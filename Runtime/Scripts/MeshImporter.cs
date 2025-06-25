@@ -27,6 +27,7 @@ using System.Collections.Generic;
 using System.IO;
 using Assimp;
 using UnityEngine;
+using UnityEngine.Rendering;
 using Material = UnityEngine.Material;
 using Mesh = UnityEngine.Mesh;
 
@@ -54,16 +55,37 @@ namespace UnityMeshImporter
     
     public class MeshImporter
     {
-        public static GameObject Load(string meshPath, float scaleX=1, float scaleY=1, float scaleZ=1)
+        public static bool IsHDRP()
         {
-            if(!File.Exists(meshPath))
+            var rpAsset = GraphicsSettings.defaultRenderPipeline;
+            Debug.Log(rpAsset.GetType().Name);
+            return rpAsset != null && rpAsset.GetType().Name.Contains("HDRenderPipelineAsset");
+        }
+
+        public static GameObject Load(string meshPath, float scaleX = 1, float scaleY = 1, float scaleZ = 1)
+        {
+            if (!File.Exists(meshPath))
                 return null;
+
+            string _defaultShader;
+            string _colorString;
+
+            if (IsHDRP())
+            {
+                _defaultShader = "HDRP/Lit";
+                _colorString = "_BaseColor";
+            }
+            else
+            {
+                _defaultShader = "Standard";
+                _colorString = "_Color";
+            }
 
             AssimpContext importer = new AssimpContext();
             Scene scene = importer.ImportFile(meshPath);
             if (scene == null)
                 return null;
-            
+
             string parentDir = Directory.GetParent(meshPath).FullName;
 
             // Materials
@@ -72,7 +94,8 @@ namespace UnityMeshImporter
             {
                 foreach (var m in scene.Materials)
                 {
-                    UnityEngine.Material uMaterial = new UnityEngine.Material(Shader.Find("Standard"));
+                    UnityEngine.Material uMaterial;
+                    uMaterial = new UnityEngine.Material(Shader.Find(_defaultShader));
 
                     // Albedo
                     if (m.HasColorDiffuse)
@@ -83,7 +106,7 @@ namespace UnityMeshImporter
                             m.ColorDiffuse.B,
                             m.ColorDiffuse.A
                         );
-                        uMaterial.color = color;
+                        uMaterial.SetColor(_colorString, color);
                     }
 
                     // Emission
@@ -98,27 +121,27 @@ namespace UnityMeshImporter
                         uMaterial.SetColor("_EmissionColor", color);
                         uMaterial.EnableKeyword("_EMISSION");
                     }
-                    
+
                     // Reflectivity
                     if (m.HasReflectivity)
                     {
-                        uMaterial.SetFloat("_Glossiness", m.Reflectivity);
+                        uMaterial.SetFloat("_Metallic", m.Reflectivity);
                     }
-                    
+
                     // Texture
                     if (m.HasTextureDiffuse)
                     {
-                        Texture2D uTexture = new Texture2D(2,2);
+                        Texture2D uTexture = new Texture2D(2, 2);
                         string texturePath = Path.Combine(parentDir, m.TextureDiffuse.FilePath);
-                        
+
                         byte[] byteArray = File.ReadAllBytes(texturePath);
                         bool isLoaded = uTexture.LoadImage(byteArray);
                         if (!isLoaded)
                         {
                             throw new Exception("Cannot find texture file: " + texturePath);
                         }
-                        
-                        uMaterial.SetTexture("_MainTex", uTexture);
+
+                        uMaterial.SetTexture("_BaseColorMap", uTexture);
                     }
 
                     uMaterials.Add(uMaterial);
@@ -135,7 +158,7 @@ namespace UnityMeshImporter
                     List<Vector3> uNormals = new List<Vector3>();
                     List<Vector2> uUv = new List<Vector2>();
                     List<int> uIndices = new List<int>();
-                
+
                     // Vertices
                     if (m.HasVertices)
                     {
@@ -163,10 +186,10 @@ namespace UnityMeshImporter
                             if (f.IndexCount == 1 || f.IndexCount == 2)
                                 continue;
 
-                            for(int i=0;i<(f.IndexCount-2);i++)
+                            for (int i = 0; i < (f.IndexCount - 2); i++)
                             {
-                                uIndices.Add(f.Indices[i+2]);
-                                uIndices.Add(f.Indices[i+1]);
+                                uIndices.Add(f.Indices[i + 2]);
+                                uIndices.Add(f.Indices[i + 1]);
                                 uIndices.Add(f.Indices[0]);
                             }
                         }
@@ -180,7 +203,7 @@ namespace UnityMeshImporter
                             uUv.Add(new Vector2(uv.X, uv.Y));
                         }
                     }
-                
+
                     UnityEngine.Mesh uMesh = new UnityEngine.Mesh();
                     if (uVertices.Count > ushort.MaxValue)
                     {
@@ -194,31 +217,31 @@ namespace UnityMeshImporter
                     uMeshAndMats.Add(new MeshMaterialBinding(m.Name, uMesh, uMaterials[m.MaterialIndex]));
                 }
             }
-            
+
             // Create GameObjects from nodes
             GameObject NodeToGameObject(Node node)
             {
                 GameObject uOb = new GameObject(node.Name);
-            
+
                 // Set Mesh
                 if (node.HasMeshes)
                 {
                     foreach (var mIdx in node.MeshIndices)
                     {
                         var uMeshAndMat = uMeshAndMats[mIdx];
-                        
+
                         GameObject uSubOb = new GameObject(uMeshAndMat.MeshName);
                         uSubOb.AddComponent<MeshFilter>();
                         uSubOb.AddComponent<MeshRenderer>();
                         uSubOb.AddComponent<MeshCollider>();
-                    
+
                         uSubOb.GetComponent<MeshFilter>().mesh = uMeshAndMat.Mesh;
                         uSubOb.GetComponent<MeshRenderer>().material = uMeshAndMat.Material;
                         uSubOb.transform.SetParent(uOb.transform, true);
                         uSubOb.transform.localScale = new Vector3(scaleX, scaleY, scaleZ);
                     }
                 }
-            
+
                 // Transform
                 // Decompose Assimp transform into scale, rot and translaction 
                 Assimp.Vector3D aScale = new Assimp.Vector3D();
@@ -232,7 +255,7 @@ namespace UnityMeshImporter
                 uOb.transform.localScale = new UnityEngine.Vector3(aScale.X, aScale.Y, aScale.Z);
                 uOb.transform.localPosition = new UnityEngine.Vector3(aTranslation.X, aTranslation.Y, aTranslation.Z);
                 uOb.transform.localRotation = UnityEngine.Quaternion.Euler(euler.x, -euler.y, euler.z);
-            
+
                 if (node.HasChildren)
                 {
                     foreach (var cn in node.Children)
@@ -241,11 +264,11 @@ namespace UnityMeshImporter
                         uObChild.transform.SetParent(uOb.transform, false);
                     }
                 }
-            
+
                 return uOb;
             }
-            
-            return NodeToGameObject(scene.RootNode);;
+
+            return NodeToGameObject(scene.RootNode); ;
         }
     }
 }
