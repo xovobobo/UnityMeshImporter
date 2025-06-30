@@ -58,7 +58,6 @@ namespace UnityMeshImporter
         public static bool IsHDRP()
         {
             var rpAsset = GraphicsSettings.defaultRenderPipeline;
-            Debug.Log(rpAsset.GetType().Name);
             return rpAsset != null && rpAsset.GetType().Name.Contains("HDRenderPipelineAsset");
         }
 
